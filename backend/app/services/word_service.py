@@ -199,7 +199,7 @@ def analyze_sentiment(word: str) -> Dict:
 def get_word_vector(word: str) -> List[float]:
     """Return an embedding preview from the centralized ML service."""
     embedding = _ml_service.get_word_embedding(word)
-    return embedding.tolist()[:5] if embedding is not None else []
+    return embedding[:5] if embedding is not None else []
 
 
 def find_similar_words(word: str) -> List[str]:
@@ -269,7 +269,7 @@ async def get_advanced_analysis(word: str) -> Dict:
         "ml_analysis": {
             "sentiment": _ml_service.get_sentiment(normalized),
             "embedding_dimensions": int(len(embedding)) if embedding is not None else 0,
-            "embedding_preview": embedding.tolist()[:5] if embedding is not None else [],
+            "embedding_preview": embedding[:5] if embedding is not None else [],
             "note": "Embedding is a representation, not a dictionary definition or sentiment explanation.",
         },
     }
@@ -320,7 +320,7 @@ async def fetch_word_data(word: str) -> Dict:
             **data,
             "word": normalized,
             "sentiment": _ml_service.get_sentiment(normalized),
-            "word_vector": embedding.tolist() if embedding is not None else [],
+            "word_vector": embedding if embedding is not None else [],
         }
     except HTTPException as exc:
         if exc.status_code == 404:
