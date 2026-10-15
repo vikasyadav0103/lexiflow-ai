@@ -106,6 +106,15 @@ pip install -r requirements.txt
 
 Create a MySQL database (default name: `word_dictionary`) and copy `.env.example` to `.env`. Update the credentials before starting the application.
 
+Install the spaCy English pipeline and the NLTK corpora used by the text-analysis endpoints:
+
+```bash
+python -m spacy download en_core_web_sm
+python -c "import nltk; [nltk.download(p) for p in ('punkt', 'punkt_tab', 'wordnet', 'averaged_perceptron_tagger_eng')]"
+```
+
+These NLP assets are downloaded to your local environment and are not intended to be committed to the repository. Dictionary lookup doesn't require the spaCy model; tokenization, POS tagging, and lemmatization do.
+
 Start the API from the `backend` directory:
 
 ```bash
