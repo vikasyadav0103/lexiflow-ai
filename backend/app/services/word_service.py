@@ -8,7 +8,6 @@ import aiohttp
 import spacy
 from fastapi import HTTPException
 from nltk.corpus import wordnet
-from nltk.stem import WordNetLemmatizer
 from nltk.tokenize import word_tokenize
 from sqlalchemy.orm import Session
 
@@ -18,7 +17,6 @@ from app.services.ml_service import MLService
 logger = logging.getLogger(__name__)
 DICTIONARY_API_URL = "https://api.dictionaryapi.dev/api/v2/entries/en"
 _nlp = None
-_lemmatizer = WordNetLemmatizer()
 _ml_service = MLService()
 
 
@@ -74,6 +72,7 @@ def process_dictionary_response(data: List[Dict]) -> Dict:
                 example = definition.get("example")
                 if example:
                     examples.append(example)
+                synonyms.update(definition.get("synonyms", []))
             synonyms.update(meaning.get("synonyms", []))
     phonetics = next(
         (p.get("text", "") for e in (data or []) for p in e.get("phonetics", []) if p.get("text")),
