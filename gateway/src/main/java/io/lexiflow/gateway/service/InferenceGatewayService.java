@@ -63,12 +63,16 @@ public class InferenceGatewayService {
                                 return Mono.error(new ResponseStatusException(
                                         status, "Python inference service returned an error"));
                             }
-                            return Mono.just(ResponseEntity.ok()
-                                    .contentType(MediaType.APPLICATION_JSON)
+                            return Mono.just(ResponseEntity.status(response.statusCode())
+                                    .contentType(response.headers().contentType().orElse(MediaType.APPLICATION_JSON))
                                     .body(body));
                         }))
-                .doOnSuccess(response -> meterRegistry.counter("lexiflow.gateway.requests",
-                        "operation", operation, "outcome", "success").increment())
+                .doOnSuccess(response -> {
+                    String outcome = response != null && response.getStatusCode().is2xxSuccessful()
+                            ? "success" : "upstream_error";
+                    meterRegistry.counter("lexiflow.gateway.requests",
+                            "operation", operation, "outcome", outcome).increment();
+                })
                 .doOnError(error -> meterRegistry.counter("lexiflow.gateway.requests",
                         "operation", operation, "outcome", "error").increment())
                 .doFinally(signal -> {
