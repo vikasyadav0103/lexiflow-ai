@@ -102,9 +102,11 @@ def get_tokenization(request: TokenizationRequest, db: Session = Depends(get_db)
         return tokens
     except HTTPException:
         raise
+    except HTTPException:
+        raise
     except Exception:
-        logger.exception("POS tagging failed")
-        raise HTTPException(status_code=503, detail="POS tagging model unavailable")
+        logger.exception("Tokenization failed")
+        raise HTTPException(status_code=500, detail="Tokenization failed")
 
 @router.post("/lemmatize/", response_model=List[str])
 def get_lemmatization(request: LemmatizationRequest, db: Session = Depends(get_db)):
