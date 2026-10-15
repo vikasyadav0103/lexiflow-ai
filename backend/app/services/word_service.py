@@ -1,72 +1,40 @@
-import requests
-from googletrans import Translator
-from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification, BertTokenizer, BertModel
-import spacy
-from typing import List, Dict, Tuple
-import torch
-import tensorflow as tf
-import nltk
-from nltk.tokenize import word_tokenize
-from nltk.stem import WordNetLemmatizer
-import logging
-from nltk.corpus import wordnet
-import aiohttp
-from fastapi import HTTPException
-from app.services.ml_service import MLService
-from app.services.nltk_setup import ensure_nltk_data
-import sys
+import asyncio
 import json
-from sqlalchemy.orm import Session
-from app.models.word import Word
+import logging
+from typing import Dict, List, Tuple
+from urllib.parse import quote
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
-)
+import aiohttp
+import spacy
+from fastapi import HTTPException
+from nltk.corpus import wordnet
+from nltk.stem import WordNetLemmatizer
+from nltk.tokenize import word_tokenize
+from sqlalchemy.orm import Session
+
+from app.models.word import Word
+from app.services.ml_service import MLService
 
 logger = logging.getLogger(__name__)
-
-# At the start of your file, after imports
-try:
-    ensure_nltk_data()
-except Exception as e:
-    logger.error(f"Failed to download NLTK data: {str(e)}")
-    raise
-
-# Load spaCy model
-nlp = spacy.load("en_core_web_sm")
-
-# Initialize the translation and definition pipelines
-translator = Translator()
-definition_pipeline = pipeline("text2text-generation", model="t5-small")
-
-# Initialize the text generation pipeline
-generator = pipeline('text-generation', model='gpt2')
-
-# Initialize other tools
-lemmatizer = WordNetLemmatizer()
-
-# Initialize models
-tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-bert_model = BertModel.from_pretrained('bert-base-uncased')
-sentiment_analyzer = pipeline('sentiment-analysis')
-
-# Word embeddings model (TensorFlow)
-embedding_dim = 50
-vocab_size = 10000
-embedding_model = tf.keras.Sequential([
-    tf.keras.layers.Embedding(vocab_size, embedding_dim),
-    tf.keras.layers.GlobalAveragePooling1D()
-])
-
 DICTIONARY_API_URL = "https://api.dictionaryapi.dev/api/v2/entries/en"
+_nlp = None
+_lemmatizer = WordNetLemmatizer()
+_ml_service = MLService()
 
-# Initialize ML Service
-ml_service = MLService()
+
+def _get_nlp():
+    """Load spaCy only when an NLP endpoint needs it."""
+    global _nlp
+    if _nlp is None:
+        try:
+            _nlp = spacy.load("en_core_web_sm")
+        except OSError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="NLP model is not installed. Run: python -m spacy download en_core_web_sm",
+            ) from exc
+    return _nlp
+
 
 async def get_word_details(word: str) -> Dict:
     """Fetch word details from the Free Dictionary API"""
