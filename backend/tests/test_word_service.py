@@ -34,7 +34,7 @@ def test_process_dictionary_response_extracts_definitions_examples_and_synonyms(
         "Intelligent and quick-witted.",
     ]
     assert result["context_examples"] == ["A bright room."]
-    assert result["similar_words"] == ["clever"]
+    assert result["similar_words"] == ["clever", "radiant"]
     assert result["phonetics"] == "/braɪt/"
     assert result["source"] == "Dictionary API"
     assert result["sentiment"]["label"] == "UNAVAILABLE"
