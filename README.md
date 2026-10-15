@@ -13,7 +13,7 @@
 - Search-history and frequency endpoints.
 - React + Vite interface for dictionary search, analysis, and history.
 
-Some ML features load pretrained models and may require a first-run download, network access, and additional RAM/CPU. Model outputs depend on the model and its training; validate them before using them for decisions.
+The optional embedding feature loads a pretrained model on first use and may require network access, additional RAM/CPU, and several gigabytes of disk space. Model outputs depend on the model and its training; validate them before using them for decisions.
 
 ## Architecture today
 
