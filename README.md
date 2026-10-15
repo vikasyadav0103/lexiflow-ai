@@ -2,7 +2,7 @@
 
 **An AI-powered dictionary and language-analysis platform** built around a Python API, NLP/ML capabilities, and a React web application. The project is being evolved toward a modular platform with a separate Java Spring Boot inference gateway.
 
-> **Project status:** Existing dictionary backend and frontend; inference gateway is planned and not yet part of the repository.
+> **Project status:** The Python dictionary backend and React frontend exist. A first Spring Boot gateway scaffold is now included under `gateway/`; it is under active development and should be tested before deployment.
 
 ## Current capabilities
 
@@ -28,13 +28,13 @@ FastAPI backend  -----> Free Dictionary API
       MySQL
 ```
 
-## Planned evolution
+## Current service boundaries
 
 ```text
 React frontend
      |
      v
-Spring Boot inference gateway  (planned)
+Spring Boot inference gateway  (`gateway/`)
   - routing and request validation
   - timeout / concurrency limits
   - metrics and health checks
@@ -46,7 +46,7 @@ Python FastAPI NLP service
      +---- Dictionary API / NLP models
 ```
 
-The gateway is a roadmap item; the current frontend talks directly to the FastAPI API.
+The frontend currently talks directly to FastAPI. Gateway integration into the frontend is a separate step; the gateway can also be exercised directly on port 8081.
 
 ## Repository layout
 
@@ -64,6 +64,9 @@ The gateway is a roadmap item; the current frontend talks directly to the FastAP
 │   ├── requirements.txt
 │   ├── .env.example
 │   └── run.py
+├── gateway/                 # Java 21 / Spring Boot reactive gateway
+│   ├── pom.xml
+│   └── src/main/java/io/lexiflow/gateway/
 └── frontend/
     ├── src/
     │   ├── api/
@@ -145,6 +148,8 @@ The Vite development server typically runs at [http://localhost:5173](http://loc
 
 ## Development roadmap
 
+- [ ] Build and test the new gateway with Maven and a running FastAPI backend.
+- [ ] Add integration tests and CI for the full stack.
 - [ ] Establish reliable tests for the existing API contracts.
 - [ ] Separate configuration, database lifecycle, and ML model initialization.
 - [ ] Add a Spring Boot inference gateway as an independent service.
