@@ -102,7 +102,8 @@ async def get_meaning(word: str, db: Session) -> Dict:
             except (TypeError, json.JSONDecodeError):
                 return fallback
 
-        meanings = safe_json(cached.meaning, [])
+        # Older manual inserts stored a plain string instead of JSON-encoded definitions.
+        meanings = safe_json(cached.meaning, [cached.meaning] if cached.meaning else [])
         embedding = safe_json(cached.bert_embedding, [])
         return {
             "word": normalized,
