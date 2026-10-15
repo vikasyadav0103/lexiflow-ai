@@ -123,6 +123,9 @@ async def get_meaning(word: str, db: Session) -> Dict:
         details = await get_word_details(normalized)
         return {"word": normalized, **process_dictionary_response([details])}
     except HTTPException as exc:
+        if exc.status_code == 503:
+            logger.info("Dictionary provider unavailable; attempting WordNet fallback")
+            return await get_fallback_meaning(normalized)
         if exc.status_code == 404:
             try:
                 synsets = wordnet.synsets(normalized)
