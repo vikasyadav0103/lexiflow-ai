@@ -64,7 +64,7 @@ function App() {
           <Navbar />
           <main className="main-content">
             <Routes>
-              <Route path="/" element={<Dictionary />} />
+              <Route path="/" element={<Dictionary updateSearchHistory={updateSearchHistory} />} />
               <Route path="/analysis" element={<WordAnalysis />} />
               <Route path="/history" element={<SearchHistory />} />
               <Route path="/frequency" element={<SearchHistoryWithCounts />} />
