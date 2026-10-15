@@ -1,175 +1,117 @@
-from http.client import HTTPException
-from fastapi import FastAPI, Depends
-from fastapi.middleware.cors import CORSMiddleware
-from app.routes import word_routes
-from app.database import get_db, init_db
-from app.services.ml_service import MLService
 import logging
 import os
-import warnings
-from dotenv import load_dotenv
-from sqlalchemy.orm import Session
-import sys
-import nltk
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-# Load environment variables
-load_dotenv()
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
-# Suppress all warnings
-warnings.filterwarnings('ignore')
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+from app.database import engine, init_db
+from app.routes import word_routes
+from app.services.ml_service import MLService
 
-# Configure logging
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+load_dotenv(BACKEND_DIR / ".env")
+
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler(sys.stdout)]
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s - %(message)s",
 )
-
-# Suppress uvicorn access logs
-logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
-
 logger = logging.getLogger(__name__)
 
-# Global ML Service instance
-ml_service = None
+ml_service: MLService | None = None
 
-def setup_nltk():
-    """Set up NLTK data"""
-    try:
-        # Set NLTK data path
-        current_dir = Path(__file__).parent.parent
-        nltk_data_dir = current_dir / 'nltk_data'
-        nltk_data_dir.mkdir(exist_ok=True)
-        nltk.data.path.append(str(nltk_data_dir))
-        
-        # Download required packages
-        packages = ['punkt', 'averaged_perceptron_tagger', 'wordnet']
-        for package in packages:
-            try:
-                nltk.download(package, download_dir=str(nltk_data_dir), quiet=True)
-            except Exception:
-                pass  # Skip if already downloaded
-    except Exception as e:
-        logger.error(f"NLTK setup error: {str(e)}")
-        return False
-    return True
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Lifecycle manager for the FastAPI application"""
-    # Startup
+    """Initialize dependencies once per application process."""
+    global ml_service
+    logger.info("Starting LexiFlow AI API")
+    init_db()
+    ml_service = MLService()
+    app.state.ml_service = ml_service
     try:
-        logger.info("Initializing application...")
-        
-        # Initialize database
-        init_db()
-        
-        # Setup NLTK
-        setup_nltk()
-        
-        # Initialize ML Service
-        global ml_service
-        ml_service = MLService()
-        
-        logger.info("Application initialized successfully!")
-        
-    except Exception as e:
-        logger.error(f"Startup error: {str(e)}")
-        raise
-    
-    yield  # Application is running
-    
-    # Shutdown
-    try:
-        logger.info("Shutting down application...")
-        # Cleanup code here if needed
-        if ml_service:
-            del ml_service
-    except Exception as e:
-        logger.error(f"Shutdown error: {str(e)}")
+        yield
+    finally:
+        logger.info("Stopping LexiFlow AI API")
+        engine.dispose()
 
-# Create FastAPI app with lifespan manager
+
 app = FastAPI(
-    title="AI Dictionary API",
-    lifespan=lifespan
+    title="LexiFlow AI API",
+    description="Dictionary lookup and language-analysis endpoints.",
+    version="0.1.0",
+    lifespan=lifespan,
 )
 
-# Configure CORS
+allowed_origins = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ALLOW_ORIGINS",
+        "http://localhost:5173,http://localhost:3000",
+    ).split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept"],
 )
 
-# Include routers
-app.include_router(
-    word_routes.router,
-    prefix="/api",
-    tags=["words"]
-)
+app.include_router(word_routes.router, prefix="/api", tags=["words"])
 
-@app.get("/")
+
+@app.get("/", tags=["health"])
 async def root():
-    """Root endpoint"""
     return {
-        "status": "healthy",
-        "ml_service": "initialized" if ml_service and ml_service._initialized else "not initialized"
+        "name": "LexiFlow AI API",
+        "status": "running",
+        "docs": "/docs",
     }
 
-@app.get("/health")
-async def health_check():
-    """Health check endpoint"""
-    try:
-        return {
-            "status": "healthy",
-            "database": "connected",
-            "ml_service": bool(ml_service and ml_service._initialized),
-            "nltk_data": "downloaded" if setup_nltk() else "missing"
-        }
-    except Exception as e:
-        logger.error(f"Health check error: {str(e)}")
-        return {
-            "status": "unhealthy",
-            "error": str(e)
-        }
 
-@app.get("/api/search-history")
-async def download_history(db: Session = Depends(get_db)):
-    try:
-        from app.models.word import UserSearchHistory, Word
-        
-        # Query search history with word text
-        history = (
-            db.query(
-                UserSearchHistory.timestamp,
-                Word.text.label('word')
-            )
-            .join(Word)
-            .order_by(UserSearchHistory.timestamp.desc())
-            .all()
-        )
-        
-        return [
-            {
-                "timestamp": entry.timestamp.isoformat(),
-                "word": entry.word
-            }
-            for entry in history
-        ]
-    except Exception as e:
-        logger.error(f"Error fetching search history: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error fetching search history: {str(e)}"
-        )
+@app.get("/health/live", tags=["health"])
+async def liveness():
+    """Process liveness; does not trigger network or model downloads."""
+    return {"status": "ok"}
 
-# Error handler for graceful shutdown
+
+@app.get("/health/ready", tags=["health"])
+async def readiness():
+    """Readiness reports initialization state without downloading assets."""
+    model_ready = bool(ml_service and getattr(ml_service, "_initialized", False))
+    try:
+        from sqlalchemy import text
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        database_ready = True
+    except Exception:
+        logger.exception("Database readiness check failed")
+        database_ready = False
+
+    ready = database_ready and model_ready
+    payload = {
+        "status": "ready" if ready else "not_ready",
+        "database": database_ready,
+        "ml_service": model_ready,
+    }
+    return JSONResponse(status_code=200 if ready else 503, content=payload)
+
+
+@app.get("/health", include_in_schema=False)
+async def health_compatibility():
+    """Compatibility alias for older deployments."""
+    return await liveness()
+
+
 @app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
-    logger.error(f"Global exception: {str(exc)}")
-    return {"detail": "Internal server error"}, 500
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled request exception: %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+    )
