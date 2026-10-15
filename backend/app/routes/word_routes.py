@@ -117,8 +117,8 @@ def get_lemmatization(request: LemmatizationRequest, db: Session = Depends(get_d
     except LookupError:
         raise HTTPException(status_code=503, detail="Tokenizer data is missing; install the required NLTK data")
     except Exception:
-        logger.exception("Tokenization failed")
-        raise HTTPException(status_code=500, detail="Tokenization failed")
+        logger.exception("Lemmatization failed")
+        raise HTTPException(status_code=503, detail="Lemmatization model unavailable")
 
 @router.get("/history")
 async def get_search_history(
