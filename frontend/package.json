@@ -16,7 +16,6 @@
     "d3": "^7.9.0",
     "dotenv": "^16.4.7",
     "framer-motion": "^12.4.7",
-    "frontend": "file:",
     "react": "^19.0.0",
     "react-chartjs-2": "^5.3.0",
     "react-dom": "^19.0.0",
