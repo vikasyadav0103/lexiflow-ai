@@ -15,7 +15,7 @@ const PositiveWords = () => {
         try {
             setLoading(true);
             const data = await getPositiveWords();
-            setWords(data.words);
+            setWords(Array.isArray(data.words) ? data.words : []);
         } catch (err) {
             setError(err.message);
         } finally {
@@ -45,12 +45,12 @@ const PositiveWords = () => {
                     {words.map((item, index) => (
                         <div key={index} className="word-card" 
                              style={{
-                                 '--sentiment-score': item.score * 100 + '%'
+                                 '--sentiment-score': Number.isFinite(item.score) ? `${item.score * 100}%` : '0%'
                              }}>
                             <h3>{item.word}</h3>
                             <div className="sentiment-bar">
                                 <div className="sentiment-fill"></div>
-                                <span>{(item.score * 100).toFixed(1)}% Positive</span>
+                                <span>{Number.isFinite(item.score) ? `${(item.score * 100).toFixed(1)}% Positive` : 'Sentiment model not configured'}</span>
                             </div>
                             {item.similar_words.length > 0 && (
                                 <div className="similar-words">
