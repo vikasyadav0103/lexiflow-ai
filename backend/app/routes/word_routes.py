@@ -287,9 +287,6 @@ async def get_positive_words_analysis():
         }
     except HTTPException as http_error:
         raise http_error
-    except Exception as e:
-        logger.error(f"Error in positive words endpoint: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=str(e)
-        )
+    except Exception:
+        logger.exception("Positive words analysis failed")
+        raise HTTPException(status_code=503, detail="Positive words analysis is unavailable")
