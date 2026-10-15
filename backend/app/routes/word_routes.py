@@ -110,17 +110,15 @@ def get_tokenization(request: TokenizationRequest, db: Session = Depends(get_db)
 def get_lemmatization(request: LemmatizationRequest, db: Session = Depends(get_db)):
     """Lemmatize the input text."""
     try:
-        lemmas = word_lemmatization(request.text)
-        return lemmas
+        return word_lemmatization(request.text)
     except HTTPException:
         raise
     except LookupError:
         raise HTTPException(status_code=503, detail="Required NLP data is missing")
-    except HTTPException:
-        raise
     except Exception:
-        logger.exception("Advanced analysis failed")
-        raise HTTPException(status_code=503, detail="Advanced analysis is unavailable")
+        logger.exception("Lemmatization failed")
+        raise HTTPException(status_code=503, detail="Lemmatization model unavailable")
+
 
 @router.get("/history")
 async def get_search_history(
