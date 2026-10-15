@@ -37,450 +37,305 @@ def _get_nlp():
 
 
 async def get_word_details(word: str) -> Dict:
-    """Fetch word details from the Free Dictionary API"""
+    """Fetch a dictionary entry from the Free Dictionary API."""
+    normalized = word.strip().lower()
+    if not normalized:
+        raise HTTPException(status_code=422, detail="Word must not be empty")
+
     try:
-        timeout = aiohttp.ClientTimeout(total=10)  # 10 seconds timeout
+        timeout = aiohttp.ClientTimeout(total=10)
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(DICTIONARY_API_URL.format(word=word)) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return data[0]  # Returns first entry
-                else:
-                    error_data = await response.text()
-                    logger.error(f"API Error: {error_data}")
-                    raise HTTPException(
-                        status_code=response.status,
-                        detail="Word not found or API error"
-                    )
-    except aiohttp.ClientError as e:
-        logger.error(f"Network error: {str(e)}")
-        raise HTTPException(
-            status_code=503,
-            detail="Service temporarily unavailable"
-        )
-    except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=str(e)
-        )
+            url = f"{DICTIONARY_API_URL}/{quote(normalized, safe='')}"
+            async with session.get(url) as response:
+                if response.status == 404:
+                    raise HTTPException(status_code=404, detail="Word not found")
+                if response.status != 200:
+                    logger.warning("Dictionary API returned HTTP %s", response.status)
+                    raise HTTPException(status_code=503, detail="Dictionary provider is unavailable")
+                payload = await response.json()
+                if not isinstance(payload, list) or not payload:
+                    raise HTTPException(status_code=404, detail="Word not found")
+                return payload[0]
+    except HTTPException:
+        raise
+    except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+        logger.warning("Dictionary API request failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Dictionary provider is unavailable") from exc
+
 
 def process_dictionary_response(data: List[Dict]) -> Dict:
-    """Process the dictionary API response"""
-    try:
-        if not data or not isinstance(data, list):
-            return {
-                "meanings": ["No definition found"],
-                "similar_words": [],
-                "context_examples": []
-            }
-
-        entry = data[0]
-        meanings = []
-        examples = []
-        similar_words = set()
-
+    meanings, examples, synonyms = [], [], set()
+    for entry in data or []:
         for meaning in entry.get("meanings", []):
             for definition in meaning.get("definitions", []):
-                if "definition" in definition:
-                    meanings.append(definition["definition"])
-                if "example" in definition:
-                    examples.append(definition["example"])
-            similar_words.update(meaning.get("synonyms", []))
-
-        return {
-            "meanings": meanings[:5],
-            "similar_words": list(similar_words)[:5],
-            "context_examples": examples[:3],
-            "phonetics": entry.get("phonetic", ""),
-            "source": "Dictionary API"
-        }
-
-    except Exception as e:
-        logger.error(f"Error processing dictionary response: {str(e)}")
-        return {
-            "meanings": ["Error processing definition"],
-            "similar_words": [],
-            "context_examples": [],
-            "error": str(e)
-        }
-
-async def get_meaning(word: str, db: Session) -> Dict:
-    """Get word meaning with database caching"""
-    try:
-        # Check cache first
-        db_word = db.query(Word).filter(Word.text == word.lower()).first()
-        
-        if db_word:
-            # Return cached data
-            return {
-                "meanings": json.loads(db_word.meaning),
-                "sentiment": {
-                    "score": db_word.sentiment_score,
-                    "label": "POSITIVE" if db_word.sentiment_score > 0.5 else "NEGATIVE"
-                },
-                "similar_words": json.loads(db_word.similar_words or '[]'),
-                "context_examples": json.loads(db_word.context_examples or '[]'),
-                "word_vector": json.loads(db_word.bert_embedding or '[]'),
-                "phonetics": db_word.phonetics,
-                "source": "cache"
-            }
-            
-        # If not in cache, fetch from API
-        word_data = await fetch_word_data(word)
-        
-        # Store in database
-        await store_word_data(db, word, word_data)
-        
-        return word_data
-        
-    except Exception as e:
-        logger.error(f"Error in get_meaning: {str(e)}")
-        return await get_fallback_meaning(word)
-
-async def get_fallback_meaning(word: str) -> Dict:
-    """Fallback method for word meaning using WordNet"""
-    try:
-        synsets = wordnet.synsets(word)
-        
-        if synsets:
-            meanings = []
-            examples = []
-            similar_words = set()
-            
-            for synset in synsets[:3]:  # Take top 3 synsets
-                meanings.append(synset.definition())
-                if synset.examples():
-                    examples.extend(synset.examples()[:2])
-                similar_words.update([lemma.name() for lemma in synset.lemmas()])
-            
-            return {
-                "meanings": meanings,
-                "similar_words": list(similar_words)[:5],
-                "context_examples": examples[:3],
-                "source": "WordNet"
-            }
-        
-        return {
-            "meanings": ["No definition found"],
-            "similar_words": [],
-            "context_examples": [],
-            "source": "WordNet"
-        }
-        
-    except Exception as e:
-        logger.error(f"Fallback error for '{word}': {str(e)}")
-        return {
-            "meanings": ["Unable to fetch meaning"],
-            "similar_words": [],
-            "context_examples": [],
-            "error": str(e)
-        }
-
-def get_dictionary_meaning(word: str) -> List[str]:
-    """Get dictionary meanings"""
-    try:
-        url = f"https://api.dictionaryapi.dev/api/v2/entries/en/{word.lower()}"
-        response = requests.get(url)
-        
-        if response.status_code == 200:
-            data = response.json()
-            meanings = []
-            
-            for entry in data:
-                for meaning in entry.get('meanings', []):
-                    for definition in meaning.get('definitions', []):
-                        if definition.get('definition'):
-                            meanings.append(definition['definition'])
-            
-            return meanings if meanings else ["No meaning found"]
-            
-    except Exception as e:
-        logger.error(f"Error fetching meaning: {str(e)}")
-        return ["Unable to fetch meaning"]
-
-def analyze_sentiment(word: str) -> Dict:
-    """Analyze word sentiment using BERT"""
-    try:
-        result = sentiment_analyzer(word)[0]
-        return {
-            "label": result["label"],
-            "score": float(result["score"])
-        }
-    except Exception as e:
-        return {"error": str(e)}
-
-def get_word_vector(word: str) -> List[float]:
-    """Get word embedding using BERT"""
-    try:
-        inputs = tokenizer(word, return_tensors="pt", padding=True, truncation=True)
-        with torch.no_grad():
-            outputs = bert_model(**inputs)
-        # Get the word embedding and convert to list
-        word_vector = outputs.last_hidden_state.mean(dim=1).squeeze().tolist()
-        # Return first 5 dimensions for readability
-        return word_vector[:5] if isinstance(word_vector, list) else word_vector.tolist()[:5]
-    except Exception as e:
-        logger.error(f"Error getting word vector: {str(e)}")
-        return [0.0] * 5
-
-def find_similar_words(word: str) -> List[str]:
-    """Find similar words using WordNet"""
-    try:
-        synonyms = set()
-        for syn in wordnet.synsets(word):
-            for lemma in syn.lemmas():
-                if lemma.name() != word:
-                    synonyms.add(lemma.name())
-        
-        # Get related words from dictionary API
-        url = f"https://api.dictionaryapi.dev/api/v2/entries/en/{word.lower()}"
-        response = requests.get(url)
-        if response.status_code == 200:
-            data = response.json()
-            for entry in data:
-                for meaning in entry.get('meanings', []):
-                    synonyms.update(meaning.get('synonyms', []))
-        
-        return list(synonyms)[:5] if synonyms else [f"No similar words found for: {word}"]
-    except Exception as e:
-        logger.error(f"Error finding similar words: {str(e)}")
-        return [f"Error finding similar words: {str(e)}"]
-
-def generate_context(word: str) -> List[str]:
-    """Generate example contexts using dictionary API and templates"""
-    try:
-        examples = []
-        
-        # Get examples from dictionary API
-        url = f"https://api.dictionaryapi.dev/api/v2/entries/en/{word.lower()}"
-        response = requests.get(url)
-        if response.status_code == 200:
-            data = response.json()
-            for entry in data:
-                for meaning in entry.get('meanings', []):
-                    for definition in meaning.get('definitions', []):
-                        if definition.get('example'):
-                            examples.append(definition['example'])
-        
-        # If no examples found, generate some
-        if not examples:
-            templates = [
-                f"The {word} was used in this context.",
-                f"Here's an example with '{word}'.",
-                f"You might use '{word}' in a sentence like this."
-            ]
-            examples = templates
-        
-        return examples[:3]  # Return up to 3 examples
-    except Exception as e:
-        logger.error(f"Error generating context: {str(e)}")
-        return [f"Error generating examples: {str(e)}"]
-
-def pos_tagging(text: str) -> List[Tuple[str, str]]:
-    """Get POS tags using spaCy"""
-    doc = nlp(text)
-    return [(token.text, token.pos_) for token in doc]
-
-def word_tokenization(text: str) -> List[str]:
-    """Perform word tokenization using NLTK."""
-    tokens = word_tokenize(text)
-    return tokens
-
-def word_lemmatization(text: str) -> List[str]:
-    """Perform lemmatization using spaCy."""
-    doc = nlp(text)
-    lemmas = [token.lemma_ for token in doc]
-    return lemmas
-
-def lemmatize_text(text: str) -> List[Tuple[str, str]]:
-    """Perform lemmatization using both NLTK and spaCy"""
-    # SpaCy lemmatization
-    doc = nlp(text)
-    spacy_lemmas = [(token.text, token.lemma_) for token in doc]
-    
-    # NLTK lemmatization
-    words = word_tokenize(text)
-    nltk_lemmas = [(word, lemmatizer.lemmatize(word)) for word in words]
-    
-    return list(set(spacy_lemmas + nltk_lemmas))
-
-async def get_word_analysis(word: str) -> Dict:
-    """Get complete word analysis including meanings, POS, tokens, and lemmas"""
-    text = word.strip().lower()
-    
-    # Get word details asynchronously
-    word_details = await get_word_details(text)
-    
+                definition_text = definition.get("definition")
+                if definition_text:
+                    meanings.append(definition_text)
+                example = definition.get("example")
+                if example:
+                    examples.append(example)
+            synonyms.update(meaning.get("synonyms", []))
+    phonetics = next(
+        (p.get("text", "") for e in (data or []) for p in e.get("phonetics", []) if p.get("text")),
+        (data[0].get("phonetic", "") if data else ""),
+    )
     return {
-        "word": text,
-        "meanings": word_details.get("meanings", []),
-        "pos_tags": pos_tagging(text),
-        "tokens": word_tokenization(text),
-        "lemmas": lemmatize_text(text)
+        "meanings": meanings[:5],
+        "similar_words": sorted(synonyms)[:10],
+        "context_examples": examples[:3],
+        "phonetics": phonetics,
+        "source": "Dictionary API",
     }
 
-# TensorFlow and PyTorch models for advanced processing
-def initialize_ml_models():
-    """Initialize TensorFlow and PyTorch models"""
-    # TensorFlow text classification
-    tf_model = tf.keras.Sequential([
-        tf.keras.layers.Embedding(10000, 16),
-        tf.keras.layers.GlobalAveragePooling1D(),
-        tf.keras.layers.Dense(16, activation='relu'),
-        tf.keras.layers.Dense(1, activation='sigmoid')
-    ])
-    
-    # PyTorch transformer model
-    tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
-    pt_model = AutoModelForSequenceClassification.from_pretrained("bert-base-uncased")
-    
-    return tf_model, pt_model, tokenizer
+
+async def get_meaning(word: str, db: Session) -> Dict:
+    """Look up a word, prefer cached dictionary data, then use WordNet fallback."""
+    normalized = word.strip().lower()
+    if not normalized:
+        raise HTTPException(status_code=422, detail="Word must not be empty")
+
+    cached = db.query(Word).filter(Word.text == normalized).first()
+    if cached:
+        def safe_json(value, fallback):
+            try:
+                return json.loads(value) if value else fallback
+            except (TypeError, json.JSONDecodeError):
+                return fallback
+
+        meanings = safe_json(cached.meaning, [])
+        similar = safe_json(cached.similar_words, [])
+        examples = safe_json(cached.context_examples, [])
+        embedding = safe_json(cached.bert_embedding, [])
+        return {
+            "word": normalized,
+            "meanings": meanings if isinstance(meanings, list) else [str(meanings)],
+            "sentiment": {
+                "score": cached.sentiment_score,
+                "label": "NEUTRAL" if cached.sentiment_score is None else (
+                    "POSITIVE" if cached.sentiment_score >= 0.5 else "NEGATIVE"
+                ),
+            },
+            "similar_words": similar,
+            "context_examples": examples,
+            "word_vector": embedding,
+            "phonetics": cached.phonetics or "",
+            "source": "cache",
+        }
+
+    try:
+        details = await get_word_details(normalized)
+        return {"word": normalized, **process_dictionary_response([details])}
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            try:
+                synsets = wordnet.synsets(normalized)
+            except LookupError:
+                synsets = []
+            if synsets:
+                return {
+                    "word": normalized,
+                    "meanings": [synset.definition() for synset in synsets[:3]],
+                    "similar_words": sorted({
+                        lemma.name().replace("_", " ")
+                        for synset in synsets[:3] for lemma in synset.lemmas()
+                    })[:10],
+                    "context_examples": [
+                        example for synset in synsets[:3] for example in synset.examples()
+                    ][:3],
+                    "phonetics": "",
+                    "source": "WordNet",
+                }
+        raise
+
+
+async def get_fallback_meaning(word: str) -> Dict:
+    """Build a dictionary fallback from WordNet when the public API is unavailable."""
+    normalized = word.strip().lower()
+    try:
+        synsets = wordnet.synsets(normalized)
+    except LookupError:
+        synsets = []
+    return {
+        "word": normalized,
+        "meanings": [synset.definition() for synset in synsets[:3]] or ["No definition found"],
+        "similar_words": sorted({
+            lemma.name().replace("_", " ")
+            for synset in synsets[:3] for lemma in synset.lemmas()
+        })[:10],
+        "context_examples": [example for synset in synsets[:3] for example in synset.examples()][:3],
+        "phonetics": "",
+        "source": "WordNet" if synsets else "fallback",
+    }
+
+
+def get_dictionary_meaning(word: str) -> List[str]:
+    """Synchronous compatibility helper; prefer get_word_details in async routes."""
+    import requests
+    try:
+        response = requests.get(
+            f"{DICTIONARY_API_URL}/{quote(word.strip().lower(), safe='')}",
+            timeout=10,
+        )
+        if response.status_code == 200:
+            return process_dictionary_response(response.json()).get("meanings", [])
+        return ["No meaning found"] if response.status_code == 404 else ["Dictionary provider unavailable"]
+    except requests.RequestException:
+        logger.exception("Dictionary provider request failed")
+        return ["Dictionary provider unavailable"]
+
+
+def analyze_sentiment(word: str) -> Dict:
+    """Use the centralized ML service rather than initializing a duplicate model."""
+    return _ml_service.get_sentiment(word)
+
+
+def get_word_vector(word: str) -> List[float]:
+    """Return an embedding preview from the centralized ML service."""
+    embedding = _ml_service.get_word_embedding(word)
+    return embedding.tolist()[:5] if embedding is not None else []
+
+
+def find_similar_words(word: str) -> List[str]:
+    """Find related terms using WordNet without an extra network request."""
+    normalized = word.strip().lower()
+    try:
+        synonyms = {
+            lemma.name().replace("_", " ")
+            for synset in wordnet.synsets(normalized)
+            for lemma in synset.lemmas()
+            if lemma.name().lower() != normalized
+        }
+        return sorted(synonyms)[:10]
+    except LookupError:
+        return []
+
+
+async def generate_context(word: str) -> List[str]:
+    """Return example sentences from the dictionary provider, when available."""
+    try:
+        details = await get_word_details(word)
+        return process_dictionary_response([details]).get("context_examples", [])
+    except HTTPException:
+        return []
+
+
+def pos_tagging(text: str) -> List[Tuple[str, str]]:
+    return [(token.text, token.pos_) for token in _get_nlp()(text)]
+
+
+def word_tokenization(text: str) -> List[str]:
+    return word_tokenize(text)
+
+
+def word_lemmatization(text: str) -> List[str]:
+    return [token.lemma_ for token in _get_nlp()(text)]
+
+
+def lemmatize_text(text: str) -> List[Tuple[str, str]]:
+    return [(token.text, token.lemma_) for token in _get_nlp()(text)]
+
+
+async def get_word_analysis(word: str) -> Dict:
+    normalized = word.strip().lower()
+    details = await get_word_details(normalized)
+    return {
+        "word": normalized,
+        "meanings": process_dictionary_response([details]).get("meanings", []),
+        "pos_tags": pos_tagging(normalized),
+        "tokens": word_tokenization(normalized),
+        "lemmas": lemmatize_text(normalized),
+    }
+
+
+async def initialize_ml_models():
+    """Deprecated compatibility placeholder; MLService owns model initialization."""
+    return _ml_service
+
 
 async def get_advanced_analysis(word: str) -> Dict:
-    """Get advanced analysis using ML models"""
-    try:
-        # Get basic analysis
-        basic_analysis = await get_word_analysis(word)
-        
-        # Get ML analysis
-        bert_embeddings = ml_service.get_bert_embeddings(word)
-        sentiment = ml_service.get_sentiment(word)
-        tf_analysis = ml_service.get_tf_analysis(word)
-        
-        return {
-            **basic_analysis,
-            "ml_analysis": {
-                "bert_embeddings": bert_embeddings,
-                "sentiment": sentiment,
-                "tf_features": tf_analysis
-            }
-        }
-    except Exception as e:
-        logger.error(f"Error in advanced analysis: {str(e)}")
-        return {
-            "error": str(e),
-            "basic_analysis": basic_analysis
-        }
+    """Return available model features without fabricating an untrained TF prediction."""
+    normalized = word.strip().lower()
+    basic = await get_word_analysis(normalized)
+    embedding = _ml_service.get_word_embedding(normalized)
+    return {
+        **basic,
+        "ml_analysis": {
+            "sentiment": _ml_service.get_sentiment(normalized),
+            "embedding_dimensions": int(len(embedding)) if embedding is not None else 0,
+            "embedding_preview": embedding.tolist()[:5] if embedding is not None else [],
+            "note": "Embedding is a representation, not a dictionary definition or sentiment explanation.",
+        },
+    }
+
 
 def translate_text(text: str, target_language: str = "hi"):
-    return translator.translate(text, dest=target_language).text
+    """Translate text with googletrans; requires network access."""
+    from googletrans import Translator
+    return Translator().translate(text, dest=target_language).text
+
 
 async def store_word_data(db: Session, word: str, word_data: dict) -> Word:
-    """Store word data in database"""
+    """Insert or update a cached word, rolling back on persistence errors."""
+    normalized = word.strip().lower()
     try:
-        # Check if word exists
-        db_word = db.query(Word).filter(Word.text == word.lower()).first()
-        
-        # Prepare word data
-        word_dict = {
-            'text': word.lower(),
-            'meaning': json.dumps(word_data.get('meanings', [])),
-            'bert_embedding': json.dumps(word_data.get('word_vector', [])),
-            'sentiment_score': word_data.get('sentiment', {}).get('score'),
-            'similar_words': json.dumps(word_data.get('similar_words', [])),
-            'context_examples': json.dumps(word_data.get('context_examples', [])),
-            'phonetics': word_data.get('phonetics', '')
+        db_word = db.query(Word).filter(Word.text == normalized).first()
+        values = {
+            "text": normalized,
+            "meaning": json.dumps(word_data.get("meanings", [])),
+            "bert_embedding": json.dumps(word_data.get("word_vector", [])),
+            "sentiment_score": word_data.get("sentiment", {}).get("score"),
+            "similar_words": json.dumps(word_data.get("similar_words", [])),
+            "context_examples": json.dumps(word_data.get("context_examples", [])),
+            "phonetics": word_data.get("phonetics", ""),
         }
-        
-        if db_word:
-            # Update existing word
-            for key, value in word_dict.items():
-                setattr(db_word, key, value)
-        else:
-            # Create new word
-            db_word = Word(**word_dict)
+        if db_word is None:
+            db_word = Word(**values)
             db.add(db_word)
-            
+        else:
+            for key, value in values.items():
+                setattr(db_word, key, value)
         db.commit()
         db.refresh(db_word)
         return db_word
-        
-    except Exception as e:
-        logger.error(f"Database error while storing word data: {str(e)}")
+    except Exception:
         db.rollback()
+        logger.exception("Could not cache dictionary data for %s", normalized)
         raise
 
-async def fetch_word_data(word: str) -> Dict:
-    """Fetch word data from dictionary API and enrich with ML features"""
-    try:
-        # Initialize ML service
-        ml_service = MLService()
-        
-        # Fetch from dictionary API
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"{DICTIONARY_API_URL}/{word}") as response:
-                if response.status == 200:
-                    api_data = await response.json()
-                    processed_data = process_dictionary_response(api_data)
-                else:
-                    # Use fallback if API fails
-                    processed_data = await get_fallback_meaning(word)
 
-        # Enrich with sentiment analysis
-        sentiment = ml_service.get_sentiment(word)
-        
-        # Get word vector (BERT embedding)
-        word_vector = ml_service.get_word_embedding(word)
-        
-        # Combine all data
+async def fetch_word_data(word: str) -> Dict:
+    """Compatibility API used by older callers."""
+    normalized = word.strip().lower()
+    try:
+        data = process_dictionary_response([await get_word_details(normalized)])
+        embedding = _ml_service.get_word_embedding(normalized)
         return {
-            "meanings": processed_data.get("meanings", []),
-            "similar_words": processed_data.get("similar_words", []),
-            "context_examples": processed_data.get("context_examples", []),
-            "phonetics": processed_data.get("phonetics", ""),
-            "sentiment": sentiment,
-            "word_vector": word_vector.tolist() if word_vector is not None else [],
-            "source": processed_data.get("source", "combined")
+            **data,
+            "word": normalized,
+            "sentiment": _ml_service.get_sentiment(normalized),
+            "word_vector": embedding.tolist() if embedding is not None else [],
         }
-        
-    except Exception as e:
-        logger.error(f"Error fetching word data: {str(e)}")
-        # Use fallback on error
-        return await get_fallback_meaning(word)
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            fallback = await get_fallback_meaning(normalized)
+            return {**fallback, "sentiment": {"label": "NEUTRAL", "score": 0.5}, "word_vector": []}
+        raise
+
 
 async def get_positive_words() -> List[Dict]:
-    """Get a list of positive words with their analysis"""
-    try:
-        # Common positive words
-        positive_words = [
-            "happy", "joy", "love", "peace", "wonderful",
-            "excellent", "amazing", "beautiful", "success",
-            "hope", "kindness", "gratitude", "courage", "inspire"
-        ]
-        
-        ml_service = MLService()
-        results = []
-        
-        for word in positive_words:
-            try:
-                # Get sentiment analysis
-                sentiment = ml_service.get_sentiment(word)
-                
-                # Get word embedding
-                embedding = ml_service.get_word_embedding(word)
-                
-                # Get similar words
-                similar = ml_service.get_similar_words(word, n=3)
-                
-                results.append({
-                    "word": word,
-                    "sentiment": sentiment,
-                    "similar_words": similar,
-                    "score": sentiment.get("score", 0)
-                })
-                
-            except Exception as word_error:
-                logger.error(f"Error analyzing word {word}: {str(word_error)}")
-                continue
-        
-        # Sort by sentiment score
-        results.sort(key=lambda x: x["score"], reverse=True)
-        return results
-        
-    except Exception as e:
-        logger.error(f"Error getting positive words: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error getting positive words: {str(e)}"
-        )
+    """Analyze a curated list, tolerating no model-specific extra capabilities."""
+    positive_words = [
+        "happy", "joy", "love", "peace", "wonderful", "excellent", "amazing",
+        "beautiful", "success", "hope", "kindness", "gratitude", "courage", "inspire",
+    ]
+    result = []
+    for word in positive_words:
+        sentiment = _ml_service.get_sentiment(word)
+        result.append({
+            "word": word,
+            "sentiment": sentiment,
+            "similar_words": find_similar_words(word),
+            "score": sentiment.get("score", 0.5),
+        })
+    result.sort(key=lambda item: item["score"], reverse=True)
+    return result
