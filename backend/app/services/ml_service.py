@@ -1,198 +1,120 @@
-import tensorflow as tf
-import torch
-from transformers import (
-    BertTokenizer,
-    BertModel,
-    AutoModelForSequenceClassification,
-    pipeline
-)
-import numpy as np
 import logging
 import os
-import warnings
+import threading
 from typing import Dict, List, Optional
-# Suppress all warnings
-warnings.filterwarnings('ignore')
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TensorFlow logging
+
+import numpy as np
+import torch
+from transformers import AutoModel, AutoTokenizer
 
 logger = logging.getLogger(__name__)
 
+
 class MLService:
+    """Lazily initialized text embedding service.
+
+    The original implementation used an untrained BERT classification head and
+    reported its arbitrary logits as sentiment. Until a real fine-tuned
+    sentiment checkpoint is configured, sentiment is reported as unavailable
+    rather than fabricated.
+    """
+
     _instance = None
-    _initialized = False
-    
+    _instance_lock = threading.Lock()
+
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super(MLService, cls).__new__(cls)
+            with cls._instance_lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
+                    cls._instance._initialization_lock = threading.Lock()
         return cls._instance
-    
+
     def __init__(self):
-        """Initialize ML models using singleton pattern"""
+        # Model loading is lazy; API startup should not download multi-GB assets.
+        if not hasattr(self, "_model_name"):
+            self._model_name = os.getenv("LEXIFLOW_EMBEDDING_MODEL", "bert-base-uncased")
+            self._tokenizer = None
+            self._model = None
+            self._device = torch.device(
+                "cuda" if torch.cuda.is_available() else "cpu"
+            )
+
+    @property
+    def _initialized(self) -> bool:
+        return self._model is not None and self._tokenizer is not None
+
+    def initialize_models(self) -> None:
+        """Load the embedding model only when a feature requires it."""
         if self._initialized:
             return
-            
-        try:
-            logger.info("Initializing ML models...")
-            
-            # Initialize models with offline mode first, then online if needed
+        with self._initialization_lock:
+            if self._initialized:
+                return
+            local_only = os.getenv("LEXIFLOW_LOCAL_MODELS_ONLY", "false").lower() == "true"
             try:
-                # Try loading models from cache first
-                self.bert_tokenizer = BertTokenizer.from_pretrained(
-                    'bert-base-uncased',
-                    local_files_only=True
+                tokenizer = AutoTokenizer.from_pretrained(
+                    self._model_name,
+                    local_files_only=local_only,
                 )
-                self.bert_model = BertModel.from_pretrained(
-                    'bert-base-uncased',
-                    local_files_only=True
+                model = AutoModel.from_pretrained(
+                    self._model_name,
+                    local_files_only=local_only,
                 )
-                self.sentiment_model = AutoModelForSequenceClassification.from_pretrained(
-                    'bert-base-uncased',
-                    num_labels=2,
-                    local_files_only=True
-                )
-            except Exception as cache_error:
-                logger.warning("Cache miss, downloading models...")
-                # If cache miss, download models
-                self.bert_tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-                self.bert_model = BertModel.from_pretrained('bert-base-uncased')
-                self.sentiment_model = AutoModelForSequenceClassification.from_pretrained(
-                    'bert-base-uncased',
-                    num_labels=2
-                )
-            
-            # Move models to CPU (or GPU if available)
-            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-            self.bert_model = self.bert_model.to(self.device)
-            self.sentiment_model = self.sentiment_model.to(self.device)
-            
-            # Set models to evaluation mode
-            self.bert_model.eval()
-            self.sentiment_model.eval()
-            
-            self._initialized = True
-            logger.info(f"ML models initialized successfully on {self.device}")
-            
-        except Exception as e:
-            logger.error(f"Error initializing ML models: {str(e)}")
-            self._initialized = False
-            raise
+                model.to(self._device)
+                model.eval()
+                self._tokenizer = tokenizer
+                self._model = model
+                logger.info("Loaded embedding model %s on %s", self._model_name, self._device)
+            except Exception:
+                logger.exception("Unable to load embedding model %s", self._model_name)
+                raise
+
+    def get_word_embedding(self, text: str) -> Optional[np.ndarray]:
+        """Return a mean-pooled contextual embedding or None when unavailable."""
+        if not text or not text.strip():
+            return None
+        try:
+            self.initialize_models()
+            inputs = self._tokenizer(
+                text.strip(),
+                return_tensors="pt",
+                truncation=True,
+                max_length=128,
+            )
+            inputs = {key: value.to(self._device) for key, value in inputs.items()}
+            with torch.inference_mode():
+                outputs = self._model(**inputs)
+                mask = inputs.get("attention_mask")
+                hidden = outputs.last_hidden_state
+                if mask is not None:
+                    mask = mask.unsqueeze(-1).to(hidden.dtype)
+                    pooled = (hidden * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1)
+                else:
+                    pooled = hidden.mean(dim=1)
+            return pooled[0].detach().cpu().numpy()
+        except Exception:
+            logger.exception("Embedding generation failed")
+            return None
+
+    def get_bert_embeddings(self, text: str) -> List[float]:
+        """Compatibility method returning a compact five-dimension preview."""
+        embedding = self.get_word_embedding(text)
+        return embedding.tolist()[:5] if embedding is not None else []
 
     def get_sentiment(self, text: str) -> Dict:
-        """Get sentiment analysis"""
-        if not self._initialized:
-            return {"label": "NEUTRAL", "score": 0.5}
-            
-        try:
-            # Tokenize input
-            inputs = self.bert_tokenizer(
-                text,
-                return_tensors="pt",
-                truncation=True,
-                max_length=128,
-                padding=True
-            ).to(self.device)
-            
-            # Get sentiment
-            with torch.no_grad():
-                outputs = self.sentiment_model(**inputs)
-                predictions = torch.nn.functional.softmax(outputs.logits, dim=-1)
-            
-            # Get probabilities
-            negative_prob, positive_prob = predictions[0].cpu().numpy()
-            
-            return {
-                "label": "POSITIVE" if positive_prob > negative_prob else "NEGATIVE",
-                "score": float(max(positive_prob, negative_prob))
-            }
-            
-        except Exception as e:
-            logger.error(f"Error in sentiment analysis: {str(e)}")
-            return {"label": "NEUTRAL", "score": 0.5}
+        """Sentiment is unavailable until a trained classifier is configured."""
+        return {
+            "label": "UNAVAILABLE",
+            "score": None,
+            "reason": "No fine-tuned sentiment model is configured.",
+        }
 
-    def get_word_embedding(self, word: str) -> Optional[np.ndarray]:
-        """Get BERT embedding for a word"""
-        if not self._initialized:
-            return np.zeros(768)
-            
-        try:
-            # Tokenize input
-            inputs = self.bert_tokenizer(
-                word,
-                return_tensors="pt",
-                truncation=True,
-                max_length=128,
-                padding=True
-            ).to(self.device)
-            
-            # Get embedding
-            with torch.no_grad():
-                outputs = self.bert_model(**inputs)
-                # Use [CLS] token embedding
-                embedding = outputs.last_hidden_state[0, 0, :].cpu().numpy()
-            
-            return embedding
-            
-        except Exception as e:
-            logger.error(f"Error getting word embedding: {str(e)}")
-            return np.zeros(768)
+    def get_tf_analysis(self, text: str) -> List[float]:
+        """Compatibility method; an untrained TensorFlow model is not used."""
+        return []
 
-    def initialize_models(self):
-        """Initialize all ML models"""
-        try:
-            # BERT Models
-            self.bert_tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-            self.bert_model = BertModel.from_pretrained('bert-base-uncased')
-            self.sentiment_model = AutoModelForSequenceClassification.from_pretrained('bert-base-uncased')
-            
-            # TensorFlow Word Embedding Model
-            self.embedding_dim = 50
-            self.vocab_size = 10000
-            self.tf_model = self.create_tf_model()
-            
-            logger.info("ML models initialized successfully")
-        except Exception as e:
-            logger.error(f"Error initializing ML models: {str(e)}")
-            raise
-
-    def create_tf_model(self) -> tf.keras.Model:
-        """Create TensorFlow model for word embeddings"""
-        return tf.keras.Sequential([
-            tf.keras.layers.Embedding(self.vocab_size, self.embedding_dim),
-            tf.keras.layers.GlobalAveragePooling1D(),
-            tf.keras.layers.Dense(64, activation='relu'),
-            tf.keras.layers.Dense(32, activation='relu'),
-            tf.keras.layers.Dense(16, activation='relu')
-        ])
-
-    def get_bert_embeddings(self, word: str) -> List[float]:
-        """Get BERT word embeddings"""
-        try:
-            inputs = self.bert_tokenizer(word, return_tensors="pt", padding=True, truncation=True)
-            with torch.no_grad():
-                outputs = self.bert_model(**inputs)
-            embeddings = outputs.last_hidden_state.mean(dim=1).squeeze().numpy()
-            return embeddings.tolist()[:5]  # Return first 5 dimensions
-        except Exception as e:
-            logger.error(f"Error getting BERT embeddings: {str(e)}")
-            return [0.0] * 5
-
-    def get_tf_analysis(self, word: str) -> List[float]:
-        """Get TensorFlow model analysis"""
-        try:
-            # Convert word to sequence
-            sequence = self.bert_tokenizer.encode(word, padding=True, truncation=True)
-            # Get predictions
-            predictions = self.tf_model.predict([sequence], verbose=0)
-            return predictions[0].tolist()
-        except Exception as e:
-            logger.error(f"Error in TF analysis: {str(e)}")
-            return [0.0] * 16
-
-    def __del__(self):
-        """Cleanup when the service is destroyed"""
-        try:
-            # Clear CUDA cache if using GPU
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-        except Exception as e:
-            logger.error(f"Error during cleanup: {str(e)}")
+    def get_similar_words(self, word: str, n: int = 5) -> List[str]:
+        """Similarity ranking requires a corpus/index; return empty until configured."""
+        return []
