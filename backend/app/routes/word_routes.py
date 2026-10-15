@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from typing import Dict, List
 import logging
 from sqlalchemy import func, desc
-from datetime import datetime
+from datetime import datetime, timezone
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -37,11 +37,23 @@ class LemmatizationRequest(BaseModel):
 
 @router.post("/words/", response_model=WordResponse)
 def add_word(word_data: WordCreate, db: Session = Depends(get_db)):
-    db_word = Word(text=word_data.text, meaning=word_data.meaning)
-    db.add(db_word)
-    db.commit()
-    db.refresh(db_word)
-    return db_word
+    normalized = word_data.text.strip().lower()
+    if not normalized:
+        raise HTTPException(status_code=422, detail="Word must not be empty")
+    try:
+        db_word = db.query(Word).filter(Word.text == normalized).first()
+        if db_word:
+            db_word.meaning = word_data.meaning
+        else:
+            db_word = Word(text=normalized, meaning=word_data.meaning)
+            db.add(db_word)
+        db.commit()
+        db.refresh(db_word)
+        return db_word
+    except Exception:
+        db.rollback()
+        logger.exception("Could not save dictionary word")
+        raise HTTPException(status_code=500, detail="Failed to save word")
 
 @router.get("/word/{word_text}")
 def get_word(word_text: str, db: Session = Depends(get_db)):
@@ -88,8 +100,11 @@ def get_tokenization(request: TokenizationRequest, db: Session = Depends(get_db)
     try:
         tokens = word_tokenization(request.text)
         return tokens
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("POS tagging failed")
+        raise HTTPException(status_code=503, detail="POS tagging model unavailable")
 
 @router.post("/lemmatize/", response_model=List[str])
 def get_lemmatization(request: LemmatizationRequest, db: Session = Depends(get_db)):
@@ -97,8 +112,13 @@ def get_lemmatization(request: LemmatizationRequest, db: Session = Depends(get_d
     try:
         lemmas = word_lemmatization(request.text)
         return lemmas
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException:
+        raise
+    except LookupError:
+        raise HTTPException(status_code=503, detail="Tokenizer data is missing; install the required NLTK data")
+    except Exception:
+        logger.exception("Tokenization failed")
+        raise HTTPException(status_code=500, detail="Tokenization failed")
 
 @router.get("/history")
 async def get_search_history(
@@ -144,8 +164,11 @@ async def advanced_analysis(word: str):
     try:
         analysis = await get_advanced_analysis(word)
         return analysis
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Lemmatization failed")
+        raise HTTPException(status_code=503, detail="Lemmatization model unavailable")
 
 @router.get("/search-history", response_model=List[Dict])
 async def get_search_history(db: Session = Depends(get_db)):
@@ -235,7 +258,7 @@ async def add_to_history(word_id: int, db: Session = Depends(get_db)):
         # Add history entry
         history_entry = UserSearchHistory(
             word_id=word_id,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(timezone.utc)
         )
         db.add(history_entry)
         db.commit()
