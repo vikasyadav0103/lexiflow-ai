@@ -27,7 +27,6 @@ class MLService:
             with cls._instance_lock:
                 if cls._instance is None:
                     cls._instance = super().__new__(cls)
-                    cls._instance._initialized = False
                     cls._instance._initialization_lock = threading.Lock()
         return cls._instance
 
