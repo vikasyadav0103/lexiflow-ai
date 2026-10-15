@@ -9,7 +9,7 @@
 - Word definitions and lookup using the Free Dictionary API, with database-backed caching.
 - Related words, example sentences, phonetics, and WordNet fallback.
 - NLP utilities for tokenization, part-of-speech tagging, and lemmatization.
-- Sentiment and embedding experiments using Transformer/PyTorch models.
+- Optional contextual embeddings using Transformers/PyTorch. Sentiment is explicitly marked unavailable until a fine-tuned classifier is configured.
 - Search-history and frequency endpoints.
 - React + Vite interface for dictionary search, analysis, and history.
 
@@ -150,15 +150,15 @@ The Vite development server typically runs at [http://localhost:5173](http://loc
 
 ## Development roadmap
 
-- [ ] Build and test the new gateway with Maven and a running FastAPI backend.
-- [ ] Add integration tests and CI for the full stack.
-- [ ] Establish reliable tests for the existing API contracts.
-- [ ] Separate configuration, database lifecycle, and ML model initialization.
-- [ ] Add a Spring Boot inference gateway as an independent service.
-- [ ] Add request timeouts, bounded concurrency, health checks, and metrics.
-- [ ] Add Docker Compose for local development.
-- [ ] Add CI for Python tests, frontend lint, and production build.
-- [ ] Remove previously committed generated environments and corpora from Git tracking.
+- [ ] Run gateway-to-FastAPI end-to-end tests with a live upstream service.
+- [ ] Expand API contract tests for database queries, search history, and failure cases.
+- [ ] Add authentication and production rate limiting before public deployment.
+- [ ] Configure a genuine fine-tuned sentiment model if sentiment analysis remains a requirement.
+- [ ] Add Docker Compose for the React, Spring Boot, FastAPI, and MySQL services.
+- [ ] Add semantic search backed by a real embedding corpus or vector index.
+- [x] Separate core API dependencies from optional Transformer model dependencies.
+- [x] Add CI for Python tests, gateway Maven verification, and frontend production build.
+- [x] Remove generated environments and downloaded NLP corpora from Git tracking.
 
 ## Contributing
 
