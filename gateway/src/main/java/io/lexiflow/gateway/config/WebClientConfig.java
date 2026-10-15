@@ -28,8 +28,8 @@ public class WebClientConfig {
                 .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, Math.toIntExact(timeout.toMillis()))
                 .responseTimeout(timeout)
                 .doOnConnected(connection -> connection
-                        .addHandlerLast(new ReadTimeoutHandler(timeout.toSeconds()))
-                        .addHandlerLast(new WriteTimeoutHandler(timeout.toSeconds())));
+                        .addHandlerLast(new ReadTimeoutHandler(Math.max(1, Math.toIntExact(timeout.toSeconds()))))
+                        .addHandlerLast(new WriteTimeoutHandler(Math.max(1, Math.toIntExact(timeout.toSeconds())))));
 
         return WebClient.builder()
                 .baseUrl(properties.getPythonBaseUrl())
