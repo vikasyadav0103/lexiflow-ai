@@ -151,6 +151,12 @@ async def get_meaning(word: str, db: Session) -> Dict:
                     ][:3],
                     "phonetics": "",
                     "source": "WordNet",
+                    "sentiment": {
+                        "label": "UNAVAILABLE",
+                        "score": None,
+                        "reason": "No fine-tuned sentiment model is configured.",
+                    },
+                    "word_vector": [],
                 }
         raise
 
@@ -172,6 +178,12 @@ async def get_fallback_meaning(word: str) -> Dict:
         "context_examples": [example for synset in synsets[:3] for example in synset.examples()][:3],
         "phonetics": "",
         "source": "WordNet" if synsets else "fallback",
+        "sentiment": {
+            "label": "UNAVAILABLE",
+            "score": None,
+            "reason": "No fine-tuned sentiment model is configured.",
+        },
+        "word_vector": [],
     }
 
 
