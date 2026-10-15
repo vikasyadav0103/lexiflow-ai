@@ -1,7 +1,7 @@
 package io.lexiflow.gateway.service;
 
 import java.util.concurrent.Semaphore;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.TimeoutException;
 
 import io.lexiflow.gateway.config.GatewayProperties;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -13,6 +13,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientRequestException;
 import org.springframework.web.server.ResponseStatusException;
 
 @Service
@@ -25,6 +26,9 @@ public class InferenceGatewayService {
             WebClient pythonWebClient,
             GatewayProperties properties,
             MeterRegistry meterRegistry) {
+        if (properties.getMaxConcurrentRequests() < 1) {
+            throw new IllegalArgumentException("maxConcurrentRequests must be positive");
+        }
         this.pythonWebClient = pythonWebClient;
         this.concurrencyLimiter = new Semaphore(properties.getMaxConcurrentRequests(), true);
         this.meterRegistry = meterRegistry;
@@ -47,7 +51,6 @@ public class InferenceGatewayService {
                     "Gateway is at its concurrent request limit"));
         }
 
-        AtomicBoolean released = new AtomicBoolean(false);
         Timer.Sample timer = Timer.start(meterRegistry);
 
         return pythonWebClient.get()
@@ -79,21 +82,23 @@ public class InferenceGatewayService {
                     timer.stop(Timer.builder("lexiflow.gateway.latency")
                             .tag("operation", operation)
                             .register(meterRegistry));
-                    if (released.compareAndSet(false, true)) {
-                        concurrencyLimiter.release();
-                    }
+                    concurrencyLimiter.release();
                 })
                 .onErrorMap(error -> {
                     if (error instanceof ResponseStatusException) {
                         return error;
                     }
-                    if (error instanceof java.util.concurrent.TimeoutException
-                            || error.getCause() instanceof java.util.concurrent.TimeoutException) {
+                    if (error instanceof TimeoutException
+                            || error.getCause() instanceof TimeoutException) {
                         return new ResponseStatusException(
                                 HttpStatus.GATEWAY_TIMEOUT, "Python inference service timed out", error);
                     }
+                    if (error instanceof WebClientRequestException) {
+                        return new ResponseStatusException(
+                                HttpStatus.BAD_GATEWAY, "Python inference service is unavailable", error);
+                    }
                     return new ResponseStatusException(
-                            HttpStatus.BAD_GATEWAY, "Python inference service is unavailable", error);
+                            HttpStatus.BAD_GATEWAY, "Python inference service failed", error);
                 });
     }
 }
