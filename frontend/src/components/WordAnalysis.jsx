@@ -8,6 +8,10 @@ const WordAnalysis = () => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
 
+    const basicAnalysis = analysis?.basic_analysis ?? analysis;
+    const sentiment = analysis?.ml_analysis?.sentiment;
+    const similarWords = analysis?.ml_analysis?.similar_words ?? analysis?.similar_words ?? [];
+
     const handleAnalyze = async (e) => {
         e.preventDefault();
         if (!word.trim()) return;
@@ -70,16 +74,16 @@ const WordAnalysis = () => {
             {analysis && (
                 <div className="analysis-results">
                     {/* Basic Analysis */}
-                    {analysis.basic_analysis && (
+                    {basicAnalysis?.meanings && (
                         <div className="analysis-card">
                             <h3>Basic Analysis</h3>
                             <div className="card-content">
                                 <p><strong>Word:</strong> {word}</p>
-                                {analysis.basic_analysis.meanings && (
+                                {basicAnalysis.meanings && (
                                     <div className="meanings-section">
                                         <h4>Meanings:</h4>
                                         <ul>
-                                            {analysis.basic_analysis.meanings.map((meaning, index) => (
+                                            {basicAnalysis.meanings.map((meaning, index) => (
                                                 <li key={index}>{meaning}</li>
                                             ))}
                                         </ul>
@@ -94,19 +98,19 @@ const WordAnalysis = () => {
                         <div className="analysis-card">
                             <h3>ML Analysis</h3>
                             <div className="card-content">
-                                {analysis.ml_analysis.sentiment && (
+                                {sentiment && (
                                     <div className="sentiment-section">
                                         <h4>Sentiment Analysis:</h4>
-                                        <p>Label: {analysis.ml_analysis.sentiment.label}</p>
-                                        <p>Score: {(analysis.ml_analysis.sentiment.score * 100).toFixed(2)}%</p>
+                                        <p>Label: {sentiment.label}</p>
+                                        <p>Score: {Number.isFinite(sentiment.score) ? `${(sentiment.score * 100).toFixed(2)}%` : 'Not available'}</p>
                                     </div>
                                 )}
                                 
-                                {analysis.ml_analysis.similar_words && (
+                                {similarWords.length > 0 && (
                                     <div className="similar-words-section">
                                         <h4>Similar Words:</h4>
                                         <div className="similar-words-list">
-                                            {analysis.ml_analysis.similar_words.map((word, index) => (
+                                            {similarWords.map((word, index) => (
                                                 <span key={index} className="similar-word">{word}</span>
                                             ))}
                                         </div>
