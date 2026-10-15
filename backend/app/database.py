@@ -1,60 +1,58 @@
-from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
-import os
-from dotenv import load_dotenv
 import logging
+import os
+from urllib.parse import quote_plus
 
+from dotenv import load_dotenv
+from sqlalchemy import create_engine
+from sqlalchemy.orm import declarative_base, sessionmaker
+
+load_dotenv()
 logger = logging.getLogger(__name__)
 
-# Load environment variables
-load_dotenv()
 
-# Database credentials
-DB_USER = os.getenv("DB_USER", "root")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "root")
-DB_HOST = os.getenv("DB_HOST", "localhost")
-DB_NAME = os.getenv("DB_NAME", "word_dictionary")
+def _database_url() -> str:
+    """Build a database URL from DATABASE_URL or individual DB_* values."""
+    override = os.getenv("DATABASE_URL")
+    if override:
+        return override
 
-# Create database URL
-SQLALCHEMY_DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/{DB_NAME}"
+    user = os.getenv("DB_USER", "root")
+    password = os.getenv("DB_PASSWORD", "")
+    host = os.getenv("DB_HOST", "127.0.0.1")
+    port = os.getenv("DB_PORT", "3306")
+    name = os.getenv("DB_NAME", "word_dictionary")
+    return (
+        f"mysql+pymysql://{quote_plus(user)}:{quote_plus(password)}"
+        f"@{host}:{port}/{name}?charset=utf8mb4"
+    )
 
-# Create engine
+
+SQLALCHEMY_DATABASE_URL = _database_url()
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL,
-    echo=True  # Set to False in production
+    pool_pre_ping=True,
+    pool_recycle=1800,
+    echo=os.getenv("SQL_ECHO", "false").lower() == "true",
 )
-
-# Create SessionLocal class
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-# Create Base class
 Base = declarative_base()
 
-def init_db():
-    """Initialize database tables"""
-    try:
-        # Import models here to avoid circular imports
-        from app.models.word import Word, UserSearchHistory
-        
-        # Drop existing tables
-        logger.info("Dropping existing tables...")
-        Base.metadata.drop_all(bind=engine)
-        
-        # Create new tables
-        logger.info("Creating new tables...")
-        Base.metadata.create_all(bind=engine)
-        
-        logger.info("Database tables created successfully!")
-        
-    except Exception as e:
-        logger.error(f"Error initializing database: {str(e)}")
-        raise
 
-# Dependency
+def init_db() -> None:
+    """Create missing tables without deleting or resetting existing data.
+
+    Use a migration tool for future schema changes.
+    """
+    from app.models.word import UserSearchHistory, Word  # noqa: F401
+
+    Base.metadata.create_all(bind=engine)
+    logger.info("Database tables are ready.")
+
+
 def get_db():
-    db = SessionLocal()
+    """Yield a SQLAlchemy session and always close it."""
+    db_session = SessionLocal()
     try:
-        yield db
+        yield db_session
     finally:
-        db.close()
+        db_session.close()
