@@ -1,5 +1,6 @@
 import pytest
 
+from app.services.ml_service import MLService
 from app.services.word_service import process_dictionary_response
 
 
@@ -48,3 +49,13 @@ def test_process_dictionary_response_handles_empty_payload():
     assert result["context_examples"] == []
     assert result["phonetics"] == ""
     assert result["word_vector"] == []
+
+
+def test_ml_service_stays_lazy_and_does_not_fake_sentiment():
+    service = MLService()
+
+    assert service._initialized is False
+    sentiment = service.get_sentiment("excellent")
+
+    assert sentiment["label"] == "UNAVAILABLE"
+    assert sentiment["score"] is None
