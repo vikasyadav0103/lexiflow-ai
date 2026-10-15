@@ -115,7 +115,9 @@ def get_lemmatization(request: LemmatizationRequest, db: Session = Depends(get_d
     except HTTPException:
         raise
     except LookupError:
-        raise HTTPException(status_code=503, detail="Tokenizer data is missing; install the required NLTK data")
+        raise HTTPException(status_code=503, detail="Required NLP data is missing")
+    except HTTPException:
+        raise
     except Exception:
         logger.exception("Advanced analysis failed")
         raise HTTPException(status_code=503, detail="Advanced analysis is unavailable")
