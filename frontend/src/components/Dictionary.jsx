@@ -3,7 +3,7 @@ import { searchWord } from '../api/api';
 import SearchResults from './SearchResults';
 import './Dictionary.css';
 
-const Dictionary = ({ updateSearchHistory }) => {
+const Dictionary = () => {
   const [word, setWord] = useState('');
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -24,10 +24,10 @@ const Dictionary = ({ updateSearchHistory }) => {
       if (!data.meanings || data.meanings.length === 0) {
         setMeaningsFound(false);
       } else {
-        updateSearchHistory(word);
+
       }
     } catch (err) {
-      // setError(err.detail || 'An error occurred');
+      setError(err.message || 'Failed to search for this word. Please try again.');
     } finally {
       setLoading(false);
     }
