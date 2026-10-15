@@ -89,7 +89,7 @@ def process_dictionary_response(data: List[Dict]) -> Dict:
 
 
 async def get_meaning(word: str, db: Session) -> Dict:
-    """Look up a word, prefer cached dictionary data, then use WordNet fallback."""
+    """Return cached or provider-backed dictionary data without model startup cost."""
     normalized = word.strip().lower()
     if not normalized:
         raise HTTPException(status_code=422, detail="Word must not be empty")
@@ -103,20 +103,17 @@ async def get_meaning(word: str, db: Session) -> Dict:
                 return fallback
 
         meanings = safe_json(cached.meaning, [])
-        similar = safe_json(cached.similar_words, [])
-        examples = safe_json(cached.context_examples, [])
         embedding = safe_json(cached.bert_embedding, [])
         return {
             "word": normalized,
             "meanings": meanings if isinstance(meanings, list) else [str(meanings)],
             "sentiment": {
-                "score": cached.sentiment_score,
-                "label": "NEUTRAL" if cached.sentiment_score is None else (
-                    "POSITIVE" if cached.sentiment_score >= 0.5 else "NEGATIVE"
-                ),
+                "label": "UNAVAILABLE",
+                "score": None,
+                "reason": "No fine-tuned sentiment model is configured.",
             },
-            "similar_words": similar,
-            "context_examples": examples,
+            "similar_words": safe_json(cached.similar_words, []),
+            "context_examples": safe_json(cached.context_examples, []),
             "word_vector": embedding,
             "phonetics": cached.phonetics or "",
             "source": "cache",
