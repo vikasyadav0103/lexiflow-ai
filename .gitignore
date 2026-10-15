@@ -24,6 +24,7 @@ backend/dict_env/
 
 # Runtime outputs and downloaded NLP/model assets
 backend/nltk_data/
+backend/nltk_data/
 nltk_data/
 .cache/
 .cache_huggingface/
