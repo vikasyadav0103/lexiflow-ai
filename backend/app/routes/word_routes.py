@@ -45,7 +45,7 @@ def add_word(word_data: WordCreate, db: Session = Depends(get_db)):
 
 @router.get("/word/{word_text}")
 def get_word(word_text: str, db: Session = Depends(get_db)):
-    word = db.query(Word).filter(Word.text == word_text).first()
+    word = db.query(Word).filter(Word.text == word_text.strip().lower()).first()
     if not word:
         raise HTTPException(status_code=404, detail="Word not found")
 
@@ -63,23 +63,20 @@ async def get_word_meaning(
 ):
     """Get word meaning with database caching"""
     try:
-        word_data = await get_meaning(word, db)
-        
-        # Add to search history
-        db_word = await store_word_data(db, word, word_data)
-        
-        history_entry = UserSearchHistory(word_id=db_word.id)
-        db.add(history_entry)
+        normalized_word = word.strip().lower()
+        if not normalized_word:
+            raise HTTPException(status_code=422, detail="Word must not be empty")
+        word_data = await get_meaning(normalized_word, db)
+        db_word = await store_word_data(db, normalized_word, word_data)
+        db.add(UserSearchHistory(word_id=db_word.id))
         db.commit()
-        
         return word_data
-        
-    except Exception as e:
-        logger.error(f"Error processing word '{word}': {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error processing word: {str(e)}"
-        )
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Error processing word %r", word)
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to process word")
 
 @router.post("/pos-tagging/")
 def get_pos_tagging(text: str):
@@ -105,20 +102,20 @@ def get_lemmatization(request: LemmatizationRequest, db: Session = Depends(get_d
 
 @router.get("/history")
 async def get_search_history(
-    page: int = 1,
-    limit: int = 10,
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=10, ge=1, le=100),
     db: Session = Depends(get_db)
 ):
-    """Get search history"""
+    """Get paginated unique words from search history."""
     skip = (page - 1) * limit
-    total = db.query(Word).count()
-    words = db.query(Word).order_by(Word.id.desc()).offset(skip).limit(limit).all()
-    
+    query = db.query(Word).join(UserSearchHistory).distinct()
+    total = query.count()
+    words = query.order_by(Word.id.desc()).offset(skip).limit(limit).all()
     return {
-        "words": [{"id": word.id, "text": word.text} for word in words],
+        "words": [{"id": item.id, "text": item.text} for item in words],
         "total_pages": (total + limit - 1) // limit,
         "current_page": page,
-        "total_items": total
+        "total_items": total,
     }
 
 @router.post("/search-history")
