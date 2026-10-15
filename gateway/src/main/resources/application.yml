@@ -1,0 +1,34 @@
+server:
+  port: ${SERVER_PORT:8081}
+  shutdown: graceful
+
+spring:
+  application:
+    name: lexiflow-inference-gateway
+  lifecycle:
+    timeout-per-shutdown-phase: 10s
+
+lexiflow:
+  gateway:
+    python-base-url: ${LEXIFLOW_PYTHON_BASE_URL:http://127.0.0.1:8000}
+    request-timeout: ${LEXIFLOW_GATEWAY_REQUEST_TIMEOUT:5s}
+    max-concurrent-requests: ${LEXIFLOW_GATEWAY_MAX_CONCURRENT_REQUESTS:32}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+  metrics:
+    tags:
+      application: lexiflow-inference-gateway
+
+info:
+  app:
+    name: LexiFlow AI Inference Gateway
+    version: 0.1.0
