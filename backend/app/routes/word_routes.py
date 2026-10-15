@@ -116,8 +116,8 @@ def get_lemmatization(request: LemmatizationRequest, db: Session = Depends(get_d
     except LookupError:
         raise HTTPException(status_code=503, detail="Required NLP data is missing")
     except Exception:
-        logger.exception("Lemmatization failed")
-        raise HTTPException(status_code=503, detail="Lemmatization model unavailable")
+        logger.exception("Advanced analysis failed")
+        raise HTTPException(status_code=503, detail="Advanced analysis is unavailable")
 
 
 @router.get("/history")
@@ -153,10 +153,12 @@ async def add_to_search_history(
 async def analyze_word(word: str):
     """Get complete word analysis"""
     try:
-        analysis = await get_word_analysis(word)
-        return analysis
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return await get_word_analysis(word)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Word analysis failed")
+        raise HTTPException(status_code=503, detail="Word analysis is unavailable")
 
 @router.get("/advanced/{word}")
 async def advanced_analysis(word: str):
