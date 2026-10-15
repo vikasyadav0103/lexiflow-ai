@@ -107,6 +107,8 @@ pip install -r requirements.txt
 pip install -r requirements.txt
 ```
 
+If you also want transformer-based embeddings, install the optional model dependencies from `backend/` with `pip install -r requirements-ml.txt`. This downloads PyTorch and Transformers and may require several gigabytes of disk space.
+
 Create a MySQL database (default name: `word_dictionary`) and copy `.env.example` to `.env`. Update the credentials before starting the application.
 
 Install the spaCy English pipeline and the NLTK corpora used by the text-analysis endpoints:
@@ -143,7 +145,7 @@ The Vite development server typically runs at [http://localhost:5173](http://loc
 - Never commit real credentials, tokens, or private environment files.
 - Use `.env.example` as a template and provide your own local `.env`.
 - Database startup must never drop existing tables. For schema changes, use explicit migrations or a deliberate maintenance procedure.
-- The service currently loads large NLP/ML dependencies and may download pretrained models at startup. Expect a slow first start and plan sufficient disk and memory.
+- Dictionary lookup uses the core dependency set. The optional embedding feature loads a pretrained model on first use; install `requirements-ml.txt` and plan sufficient disk and memory before requesting embeddings.
 - CORS, API authentication, request limits, and production deployment settings should be reviewed before exposing the service publicly.
 
 ## Development roadmap
