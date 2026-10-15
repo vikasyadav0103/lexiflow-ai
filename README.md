@@ -2,18 +2,18 @@
 
 **An AI-powered dictionary and language-analysis platform** built around a Python API, NLP/ML capabilities, and a React web application. The project is being evolved toward a modular platform with a separate Java Spring Boot inference gateway.
 
-> **Project status:** Existing dictionary backend and frontend; inference gateway is planned and not yet part of the repository.
+> **Project status:** The Python dictionary backend and React frontend exist. A first Spring Boot gateway scaffold is now included under `gateway/`; it is under active development and should be tested before deployment.
 
 ## Current capabilities
 
 - Word definitions and lookup using the Free Dictionary API, with database-backed caching.
 - Related words, example sentences, phonetics, and WordNet fallback.
 - NLP utilities for tokenization, part-of-speech tagging, and lemmatization.
-- Sentiment and embedding experiments using Transformer/PyTorch models.
+- Optional contextual embeddings using Transformers/PyTorch. Sentiment is explicitly marked unavailable until a fine-tuned classifier is configured.
 - Search-history and frequency endpoints.
 - React + Vite interface for dictionary search, analysis, and history.
 
-Some ML features load pretrained models and may require a first-run download, network access, and additional RAM/CPU. Model outputs depend on the model and its training; validate them before using them for decisions.
+The optional embedding feature loads a pretrained model on first use and may require network access, additional RAM/CPU, and several gigabytes of disk space. Model outputs depend on the model and its training; validate them before using them for decisions.
 
 ## Architecture today
 
@@ -28,13 +28,13 @@ FastAPI backend  -----> Free Dictionary API
       MySQL
 ```
 
-## Planned evolution
+## Current service boundaries
 
 ```text
 React frontend
      |
      v
-Spring Boot inference gateway  (planned)
+Spring Boot inference gateway  (`gateway/`)
   - routing and request validation
   - timeout / concurrency limits
   - metrics and health checks
@@ -46,7 +46,7 @@ Python FastAPI NLP service
      +---- Dictionary API / NLP models
 ```
 
-The gateway is a roadmap item; the current frontend talks directly to the FastAPI API.
+The frontend currently talks directly to FastAPI. Gateway integration into the frontend is a separate step; the gateway can also be exercised directly on port 8081.
 
 ## Repository layout
 
@@ -64,6 +64,9 @@ The gateway is a roadmap item; the current frontend talks directly to the FastAP
 │   ├── requirements.txt
 │   ├── .env.example
 │   └── run.py
+├── gateway/                 # Java 21 / Spring Boot reactive gateway
+│   ├── pom.xml
+│   └── src/main/java/io/lexiflow/gateway/
 └── frontend/
     ├── src/
     │   ├── api/
@@ -104,7 +107,18 @@ pip install -r requirements.txt
 pip install -r requirements.txt
 ```
 
+If you also want transformer-based embeddings, install the optional model dependencies from `backend/` with `pip install -r requirements-ml.txt`. This downloads PyTorch and Transformers and may require several gigabytes of disk space.
+
 Create a MySQL database (default name: `word_dictionary`) and copy `.env.example` to `.env`. Update the credentials before starting the application.
+
+Install the spaCy English pipeline and the NLTK corpora used by the text-analysis endpoints:
+
+```bash
+python -m spacy download en_core_web_sm
+python -c "import nltk; [nltk.download(p) for p in ('punkt', 'punkt_tab', 'wordnet', 'averaged_perceptron_tagger_eng')]"
+```
+
+These NLP assets are downloaded to your local environment and are not intended to be committed to the repository. Dictionary lookup doesn't require the spaCy model; tokenization, POS tagging, and lemmatization do.
 
 Start the API from the `backend` directory:
 
@@ -131,18 +145,20 @@ The Vite development server typically runs at [http://localhost:5173](http://loc
 - Never commit real credentials, tokens, or private environment files.
 - Use `.env.example` as a template and provide your own local `.env`.
 - Database startup must never drop existing tables. For schema changes, use explicit migrations or a deliberate maintenance procedure.
-- The service currently loads large NLP/ML dependencies and may download pretrained models at startup. Expect a slow first start and plan sufficient disk and memory.
+- Dictionary lookup uses the core dependency set. The optional embedding feature loads a pretrained model on first use; install `requirements-ml.txt` and plan sufficient disk and memory before requesting embeddings.
 - CORS, API authentication, request limits, and production deployment settings should be reviewed before exposing the service publicly.
 
 ## Development roadmap
 
-- [ ] Establish reliable tests for the existing API contracts.
-- [ ] Separate configuration, database lifecycle, and ML model initialization.
-- [ ] Add a Spring Boot inference gateway as an independent service.
-- [ ] Add request timeouts, bounded concurrency, health checks, and metrics.
-- [ ] Add Docker Compose for local development.
-- [ ] Add CI for Python tests, frontend lint, and production build.
-- [ ] Remove previously committed generated environments and corpora from Git tracking.
+- [ ] Run gateway-to-FastAPI end-to-end tests with a live upstream service.
+- [ ] Expand API contract tests for database queries, search history, and failure cases.
+- [ ] Add authentication and production rate limiting before public deployment.
+- [ ] Configure a genuine fine-tuned sentiment model if sentiment analysis remains a requirement.
+- [ ] Add Docker Compose for the React, Spring Boot, FastAPI, and MySQL services.
+- [ ] Add semantic search backed by a real embedding corpus or vector index.
+- [x] Separate core API dependencies from optional Transformer model dependencies.
+- [x] Add CI for Python tests, gateway Maven verification, and frontend production build.
+- [x] Remove generated environments and downloaded NLP corpora from Git tracking.
 
 ## Contributing
 

@@ -1,53 +1,35 @@
-import React from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import { FaSun, FaMoon } from 'react-icons/fa';
-import { useTheme } from '../context/ThemeContext';
-import './Navbar.css';
+import React from "react";
+import { Link, useLocation } from "react-router-dom";
+import "./Navbar.css";
 
 const Navbar = () => {
   const location = useLocation();
-  const { isDarkMode, toggleTheme } = useTheme();
+
+  const links = [
+    { to: "/", label: "Search" },
+    { to: "/analysis", label: "Analysis" },
+    { to: "/history", label: "History" },
+    { to: "/frequency", label: "Frequency" },
+  ];
 
   return (
     <nav className="navbar">
       <div className="navbar-brand">
-        <Link to="/" className="navbar-logo">AI Dictionary</Link>
+        <Link to="/" className="navbar-logo">LexiFlow AI</Link>
       </div>
       <div className="navbar-links">
-        <Link 
-          to="/" 
-          className={`nav-link ${location.pathname === '/' ? 'active' : ''}`}
-        >
-          Search
-        </Link>
-        {/* <Link 
-          to="/analysis" 
-          className={`nav-link ${location.pathname === '/analysis' ? 'active' : ''}`}
-        >
-          Analysis
-        </Link> */}
-        <Link 
-          to="/history" 
-          className={`nav-link ${location.pathname === '/history' ? 'active' : ''}`}
-        >
-          History
-        </Link>
-        <Link 
-          to="/frequency" 
-          className={`nav-link ${location.pathname === '/frequency' ? 'active' : ''}`}
-        >
-          Frequency
-        </Link>
-        {/* <button 
-          className="theme-toggle-nav"
-          onClick={toggleTheme}
-          aria-label="Toggle theme"
-        >
-          {isDarkMode ? <FaSun className="theme-icon" /> : <FaMoon className="theme-icon" />}
-        </button> */}
+        {links.map(({ to, label }) => (
+          <Link
+            key={to}
+            to={to}
+            className={`nav-link ${location.pathname === to ? "active" : ""}`}
+          >
+            {label}
+          </Link>
+        ))}
       </div>
     </nav>
   );
 };
 
-export default Navbar; 
+export default Navbar;

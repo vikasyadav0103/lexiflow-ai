@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -93,11 +93,13 @@ async def readiness():
         logger.exception("Database readiness check failed")
         database_ready = False
 
-    ready = database_ready and model_ready
+    # The embedding model is intentionally lazy-loaded; it is not required for
+    # the dictionary-only endpoints to serve requests.
+    ready = database_ready
     payload = {
         "status": "ready" if ready else "not_ready",
         "database": database_ready,
-        "ml_service": model_ready,
+        "ml_service": "initialized" if model_ready else "lazy",
     }
     return JSONResponse(status_code=200 if ready else 503, content=payload)
 
