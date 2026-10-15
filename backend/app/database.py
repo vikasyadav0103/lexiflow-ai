@@ -1,12 +1,14 @@
 import logging
 import os
 from urllib.parse import quote_plus
+from pathlib import Path
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-load_dotenv()
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+load_dotenv(BACKEND_DIR / ".env")
 logger = logging.getLogger(__name__)
 
 
