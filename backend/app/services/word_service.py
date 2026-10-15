@@ -85,6 +85,12 @@ def process_dictionary_response(data: List[Dict]) -> Dict:
         "context_examples": examples[:3],
         "phonetics": phonetics,
         "source": "Dictionary API",
+        "sentiment": {
+            "label": "UNAVAILABLE",
+            "score": None,
+            "reason": "No fine-tuned sentiment model is configured.",
+        },
+        "word_vector": [],
     }
 
 
@@ -338,5 +344,8 @@ async def get_positive_words() -> List[Dict]:
             "similar_words": find_similar_words(word),
             "score": sentiment.get("score", 0.5),
         })
-    result.sort(key=lambda item: item["score"], reverse=True)
+    result.sort(
+        key=lambda item: item["score"] if isinstance(item["score"], (int, float)) else 0.5,
+        reverse=True,
+    )
     return result
